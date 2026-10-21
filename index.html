@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Signos Vitales - Enfermería</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- SheetJS (xlsx) para Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+
+    <div id="app" class="flex flex-col min-h-screen">
+        <!-- HEADER INSTITUCIONAL -->
+        <header class="bg-red-700 text-white shadow-md">
+            <div class="max-w-7xl mx-auto px-4 py-4 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-red-800 rounded-lg shadow-inner">
+                        <i data-lucide="activity" class="w-8 h-8 text-white"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold tracking-wide">Control de Signos Vitales - Enfermería</h1>
+                        <p class="text-xs text-red-200">Monitoreo Clínico Multiturno con Sincronización en la Nube</p>
+                    </div>
+                </div>
+
+                <!-- CONTROLES SUPERIORES & ADMIN -->
+                <div class="flex items-center gap-3 flex-wrap">
+                    <div class="flex items-center gap-2 bg-red-800/80 px-3 py-1.5 rounded-full text-xs font-medium border border-red-600">
+                        <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span class="text-red-100">Sincronizado Cloud</span>
+                    </div>
+
+                    <!-- SELECTOR DE TURNO GLOBAL -->
+                    <div class="flex bg-red-800 p-1 rounded-lg border border-red-600 text-sm">
+                        <button @click="currentTurno = 'Matutino'" :class="currentTurno === 'Matutino' ? 'bg-white text-red-700 shadow font-semibold' : 'text-red-100 hover:text-white'" class="px-3 py-1 rounded-md transition cursor-pointer">Matutino</button>
+                        <button @click="currentTurno = 'Vespertino'" :class="currentTurno === 'Vespertino' ? 'bg-white text-red-700 shadow font-semibold' : 'text-red-100 hover:text-white'" class="px-3 py-1 rounded-md transition cursor-pointer">Vespertino</button>
+                        <button @click="currentTurno = 'Nocturno'" :class="currentTurno === 'Nocturno' ? 'bg-white text-red-700 shadow font-semibold' : 'text-red-100 hover:text-white'" class="px-3 py-1 rounded-md transition cursor-pointer">Nocturno</button>
+                    </div>
+
+                    <!-- BOTÓN ADMIN -->
+                    <button @click="toggleAdminModal" class="flex items-center gap-1.5 bg-red-900 hover:bg-red-950 text-white px-3 py-2 rounded-lg text-xs font-semibold border border-red-500 shadow transition cursor-pointer">
+                        <i data-lucide="shield" class="w-4 h-4"></i>
+                        {{ isAdmin ? 'Modo Admin (Activo)' : 'Acceso Admin' }}
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- BARRA DE HERRAMIENTAS Y FILTROS -->
+        <section class="bg-white border-b border-gray-200 shadow-sm py-3 px-4">
+            <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="relative w-full md:w-72">
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400">
+                            <i data-lucide="search" class="w-4 h-4"></i>
+                        </span>
+                        <input type="text" v-model="searchQuery" placeholder="Buscar por paciente, cama o Dx..." class="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                    </div>
+
+                    <select v-model="filterEstado" class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-red-500">
+                        <option value="Todos">Todos los Estados</option>
+                        <option value="Normal">Estables (Verde)</option>
+                        <option value="Alerta">Alerta (Amarillo)</option>
+                        <option value="Crítico">Críticos (Rojo)</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center gap-2 w-full md:w-auto justify-end flex-wrap">
+                    <!-- ACCESOS DE ADMINISTRACIÓN -->
+                    <template v-if="isAdmin">
+                        <button @click="openPatientModal(null)" class="flex items-center gap-1.5 bg-red-700 hover:bg-red-800 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow transition cursor-pointer">
+                            <i data-lucide="user-plus" class="w-4 h-4"></i> Nuevo Paciente
+                        </button>
+                        <label class="flex items-center gap-1.5 bg-sky-600 hover:bg-sky-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow cursor-pointer transition">
+                            <i data-lucide="file-up" class="w-4 h-4"></i> Cargar Excel
+                            <input type="file" @change="importExcel" accept=".xlsx, .xls, .csv" class="hidden">
+                        </label>
+                    </template>
+
+                    <button @click="exportExcel" class="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow transition cursor-pointer">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> Exportar Excel
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- CONTENIDO PRINCIPAL: LISTADO DE PACIENTES -->
+        <main class="max-w-7xl mx-auto px-4 py-6 flex-1 w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <i data-lucide="users" class="w-5 h-5 text-red-600"></i>
+                    Camas y Signos Vitales - Turno <span class="text-red-600">{{ currentTurno }}</span>
+                </h2>
+                <span class="text-sm text-gray-500">Mostrando {{ filteredPatients.length }} pacientes</span>
+            </div>
+
+            <div v-if="filteredPatients.length === 0" class="bg-white rounded-xl border border-dashed border-gray-300 p-12 text-center">
+                <i data-lucide="user-x" class="w-12 h-12 text-gray-300 mx-auto mb-3"></i>
+                <p class="text-gray-500 font-medium">No se encontraron pacientes registrados con los filtros actuales.</p>
+                <button v-if="isAdmin" @click="openPatientModal(null)" class="mt-4 text-red-600 hover:underline text-sm font-semibold cursor-pointer">Agregar un paciente ahora</button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div v-for="patient in filteredPatients" :key="patient.id" class="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden flex flex-col justify-between hover:shadow-lg transition">
+                    <div>
+                        <!-- ENCABEZADO DE TARJETA -->
+                        <div class="bg-gray-50 px-4 py-3 border-b border-gray-100 flex justify-between items-center">
+                            <span class="bg-red-100 text-red-800 font-bold px-3 py-1 rounded-full text-xs">
+                                Cama {{ patient.cama }}
+                            </span>
+                            <div class="flex items-center gap-2">
+                                <span :class="getBadgeClass(getLatestRecord(patient).estado)" class="px-2.5 py-0.5 rounded-full text-xs font-semibold flex items-center gap-1">
+                                    <span :class="getDotClass(getLatestRecord(patient).estado)" class="w-1.5 h-1.5 rounded-full"></span>
+                                    {{ getLatestRecord(patient).estado }}
+                                </span>
+                                <div v-if="isAdmin" class="flex items-center gap-1 ml-1 border-l pl-2 border-gray-200">
+                                    <button @click="openPatientModal(patient)" title="Editar Paciente" class="text-gray-500 hover:text-blue-600 p-1 cursor-pointer"><i data-lucide="edit-3" class="w-4 h-4"></i></button>
+                                    <button @click="confirmDeletePatient(patient.id)" title="Eliminar Paciente" class="text-gray-500 hover:text-red-600 p-1 cursor-pointer"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DATOS PACIENTE -->
+                        <div class="p-4">
+                            <h3 class="font-bold text-gray-900 text-base mb-1">{{ patient.nombre }}</h3>
+                            <div class="text-xs text-gray-500 space-y-1 mb-4">
+                                <p><span class="font-medium text-gray-700">Edad:</span> {{ patient.edad }} años | <span class="font-medium text-gray-700">Exp:</span> {{ patient.expediente || 'N/A' }}</p>
+                                <p><span class="font-medium text-gray-700">Diagnóstico:</span> {{ patient.diagnostico }}</p>
+                            </div>
+
+                            <!-- ÚLTIMOS SIGNOS VITALES CAPTURADOS -->
+                            <div class="bg-gray-50 rounded-lg p-3 border border-gray-100 space-y-2">
+                                <div class="flex justify-between items-center text-xs border-b border-gray-200 pb-2">
+                                    <span class="text-gray-500 font-medium">Registro Actual ({{ currentTurno }})</span>
+                                    <span class="text-gray-400 text-[11px]">{{ getLatestRecord(patient).fecha }} {{ getLatestRecord(patient).hora }}</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                                        <span class="block text-gray-400 text-[10px]">PA (mmHg)</span>
+                                        <span class="font-bold text-gray-800">{{ getLatestRecord(patient).paSys }}/{{ getLatestRecord(patient).paDias }}</span>
+                                    </div>
+                                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                                        <span class="block text-gray-400 text-[10px]">FC (lpm)</span>
+                                        <span class="font-bold text-gray-800">{{ getLatestRecord(patient).fc }}</span>
+                                    </div>
+                                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                                        <span class="block text-gray-400 text-[10px]">Temp (°C)</span>
+                                        <span class="font-bold text-gray-800">{{ getLatestRecord(patient).temp }}</span>
+                                    </div>
+                                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                                        <span class="block text-gray-400 text-[10px]">SpO2 (%)</span>
+                                        <span class="font-bold text-gray-800">{{ getLatestRecord(patient).spo2 }}%</span>
+                                    </div>
+                                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                                        <span class="block text-gray-400 text-[10px]">Glucemia</span>
+                                        <span class="font-bold text-gray-800">{{ getLatestRecord(patient).glucemia }}</span>
+                                    </div>
+                                    <div class="bg-white p-1.5 rounded border border-gray-200">
+                                        <span class="block text-gray-400 text-[10px]">EVA (Dolor)</span>
+                                        <span class="font-bold text-gray-800">{{ getLatestRecord(patient).eva }}/10</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- BOTONES DE ACCIÓN INFERIOR -->
+                    <div class="p-4 pt-0 flex gap-2">
+                        <button @click="openVitalsModal(patient)" class="flex-1 bg-red-50 hover:bg-red-100 text-red-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition border border-red-200 cursor-pointer">
+                            <i data-lucide="plus-circle" class="w-4 h-4"></i> Registrar Signos
+                        </button>
+                        <button @click="openHistoryModal(patient)" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-3 rounded-lg text-xs flex items-center justify-center gap-1.5 transition cursor-pointer">
+                            <i data-lucide="history" class="w-4 h-4"></i> Historial
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- FOOTER -->
+        <footer class="bg-white border-t border-gray-200 py-4 mt-auto">
+            <div class="max-w-7xl mx-auto px-4 text-center text-xs text-gray-500">
+                Sistema de Control Clínico de Enfermería • Integración Firebase Realtime &bull; Todos los derechos reservados
+            </div>
+        </footer>
+
+        <!-- MODAL: REGISTRAR / EDITAR SIGNOS VITALES -->
+        <div v-if="showVitalsModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl shadow-xl max-w-lg w-full overflow-hidden border border-gray-100">
+                <div class="bg-red-700 text-white px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-bold text-base">Registrar Signos Vitales</h3>
+                        <p class="text-xs text-red-100">Cama {{ activePatient?.cama }} - {{ activePatient?.nombre }}</p>
+                    </div>
+                    <button @click="closeVitalsModal" class="text-red-200 hover:text-white cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+
+                <div class="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Fecha</label>
+                            <input type="date" v-model="vitalsForm.fecha" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Hora</label>
+                            <input type="time" v-model="vitalsForm.hora" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Presión Sistólica (mmHg)</label>
+                            <input type="number" v-model.number="vitalsForm.paSys" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="Ej. 120">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Presión Diastólica (mmHg)</label>
+                            <input type="number" v-model.number="vitalsForm.paDias" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="Ej. 80">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">FC (lpm)</label>
+                            <input type="number" v-model.number="vitalsForm.fc" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="75">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">FR (rpm)</label>
+                            <input type="number" v-model.number="vitalsForm.fr" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="18">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Temp (°C)</label>
+                            <input type="number" step="0.1" v-model.number="vitalsForm.temp" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="36.5">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">SpO2 (%)</label>
+                            <input type="number" v-model.number="vitalsForm.spo2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="98">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Glucemia (mg/dL)</label>
+                            <input type="number" v-model.number="vitalsForm.glucemia" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="100">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">EVA (0 - 10)</label>
+                            <input type="number" min="0" max="10" v-model.number="vitalsForm.eva" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="0">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Observaciones / Notas de Enfermería</label>
+                        <textarea v-model="vitalsForm.observaciones" rows="2" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="Detalles relevantes del turno..."></textarea>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 px-6 py-3 flex justify-end gap-3 border-t border-gray-100">
+                    <button @click="closeVitalsModal" class="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-100 transition cursor-pointer">Cancelar</button>
+                    <button @click="saveVitals" class="px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Guardar Signos</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL: CREAR / EDITAR PACIENTE (SOLO ADMIN) -->
+        <div v-if="showPatientModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-gray-100">
+                <div class="bg-red-700 text-white px-6 py-4 flex justify-between items-center">
+                    <h3 class="font-bold text-base">{{ isEditingPatient ? 'Editar Paciente' : 'Nuevo Paciente' }}</h3>
+                    <button @click="closePatientModal" class="text-red-200 hover:text-white cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+
+                <div class="p-6 space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">N° de Cama *</label>
+                            <input type="text" v-model="patientForm.cama" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="Ej. 102-A">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Expediente</label>
+                            <input type="text" v-model="patientForm.expediente" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="EXP-9928">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Nombre Completo del Paciente *</label>
+                        <input type="text" v-model="patientForm.nombre" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="Juan Pérez Gómez">
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-gray-700 mb-1">Edad (Años)</label>
+                            <input type="number" v-model.number="patientForm.edad" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="45">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-700 mb-1">Diagnóstico Médico</label>
+                        <input type="text" v-model="patientForm.diagnostico" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none" placeholder="Post-operatorio / Hipertensión">
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 px-6 py-3 flex justify-end gap-3 border-t border-gray-100">
+                    <button @click="closePatientModal" class="px-4 py-2 border border-gray-300 rounded-lg text-xs font-semibold text-gray-700 hover:bg-gray-100 transition cursor-pointer">Cancelar</button>
+                    <button @click="savePatient" class="px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-lg text-xs font-semibold shadow transition cursor-pointer">Guardar Paciente</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL: HISTORIAL CLÍNICO -->
+        <div v-if="showHistoryModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl shadow-xl max-w-3xl w-full overflow-hidden border border-gray-100 flex flex-col max-h-[85vh]">
+                <div class="bg-red-700 text-white px-6 py-4 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-bold text-base">Historial Clínico de Signos Vitales</h3>
+                        <p class="text-xs text-red-100">Cama {{ activePatient?.cama }} - {{ activePatient?.nombre }}</p>
+                    </div>
+                    <button @click="closeHistoryModal" class="text-red-200 hover:text-white cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+
+                <div class="p-6 overflow-y-auto flex-1 space-y-4">
+                    <div v-if="!activePatient?.historial || activePatient.historial.length === 0" class="text-center py-8 text-gray-400 text-sm">
+                        No hay registros históricos guardados para este paciente.
+                    </div>
+                    <div v-for="(rec, index) in activePatient?.historial" :key="index" class="bg-gray-50 rounded-xl p-4 border border-gray-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                        <div class="space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="bg-red-700 text-white text-xs font-bold px-2 py-0.5 rounded">{{ rec.turno }}</span>
+                                <span class="text-xs text-gray-500 font-medium">{{ rec.fecha }} - {{ rec.hora }}</span>
+                                <span :class="getBadgeClass(rec.estado)" class="text-[11px] px-2 py-0.5 rounded-full font-semibold">{{ rec.estado }}</span>
+                            </div>
+                            <div class="grid grid-cols-3 sm:grid-cols-6 gap-2 text-xs pt-2">
+                                <div><span class="text-gray-400 block text-[10px]">PA</span> <span class="font-bold">{{ rec.paSys }}/{{ rec.paDias }}</span></div>
+                                <div><span class="text-gray-400 block text-[10px]">FC</span> <span class="font-bold">{{ rec.fc }}</span></div>
+                                <div><span class="text-gray-400 block text-[10px]">FR</span> <span class="font-bold">{{ rec.fr }}</span></div>
+                                <div><span class="text-gray-400 block text-[10px]">Temp</span> <span class="font-bold">{{ rec.temp }}°C</span></div>
+                                <div><span class="text-gray-400 block text-[10px]">SpO2</span> <span class="font-bold">{{ rec.spo2 }}%</span></div>
+                                <div><span class="text-gray-400 block text-[10px]">Gluc/EVA</span> <span class="font-bold">{{ rec.glucemia }} / {{ rec.eva }}</span></div>
+                            </div>
+                            <p v-if="rec.observaciones" class="text-xs text-gray-600 italic bg-white p-2 rounded border border-gray-200 mt-1">Nota: {{ rec.observaciones }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-50 px-6 py-3 flex justify-end border-t border-gray-100">
+                    <button @click="closeHistoryModal" class="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg text-xs font-semibold transition cursor-pointer">Cerrar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- MODAL: LOGIN ADMIN (CORREGIDO) -->
+        <div v-if="showAdminModal" class="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full overflow-hidden border border-gray-100">
+                <div class="bg-red-700 text-white px-6 py-4 flex justify-between items-center">
+                    <h3 class="font-bold text-base">Acceso Administrador</h3>
+                    <button @click="showAdminModal = false" class="text-red-200 hover:text-white cursor-pointer"><i data-lucide="x" class="w-5 h-5"></i></button>
+                </div>
+                
+                <div class="p-6 space-y-4">
+                    <!-- VISTA 1: INGRESAR CONTRASEÑA -->
+                    <div v-if="!isAdmin">
+                        <p class="text-xs text-gray-500 mb-3">Introduce la contraseña de administración para agregar o eliminar pacientes.</p>
+                        <input type="password" v-model="adminPassword" @keyup.enter="verifyAdmin" placeholder="Contraseña (admin123)" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-red-500 outline-none mb-3">
+                        <button @click="verifyAdmin" class="w-full bg-red-700 hover:bg-red-800 text-white py-2 rounded-lg text-xs font-semibold shadow transition cursor-pointer">Desbloquear Modo Admin</button>
+                    </div>
+                    
+                    <!-- VISTA 2: SESIÓN ACTIVA -->
+                    <div v-if="isAdmin" class="text-center space-y-4">
+                        <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto">
+                            <i data-lucide="check" class="w-6 h-6"></i>
+                        </div>
+                        <p class="text-sm font-semibold text-gray-800">¡Modo Administrador Activo!</p>
+                        <button @click="logoutAdmin" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-2 rounded-lg text-xs font-semibold transition cursor-pointer">Cerrar Sesión de Admin</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPT DE LA APLICACIÓN -->
+    <script>
+        // CONFIGURACIÓN REAL DE FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyCCIM32p8uXEmSUyvxgOChU4CXjoUspy8o",
+            authDomain: "enfermeria-signos-vitales.firebaseapp.com",
+            projectId: "enfermeria-signos-vitales",
+            storageBucket: "enfermeria-signos-vitales.firebasestorage.app",
+            messagingSenderId: "1085438228826",
+            appId: "1:1085438228826:web:59d439fa65ad549df75b63"
+        };
+
+        // Inicializar Firebase
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const currentTurno = ref('Matutino');
+                const searchQuery = ref('');
+                const filterEstado = ref('Todos');
+                const isAdmin = ref(false);
+                const showAdminModal = ref(false);
+                const adminPassword = ref('');
+
+                const patients = ref([]);
+
+                const showVitalsModal = ref(false);
+                const showPatientModal = ref(false);
+                const showHistoryModal = ref(false);
+                const isEditingPatient = ref(false);
+                const activePatient = ref(null);
+
+                const getTodayDate = () => new Date().toISOString().split('T')[0];
+                const getCurrentTime = () => {
+                    const now = new Date();
+                    return now.toTimeString().split(' ')[0].substring(0, 5);
+                };
+
+                const vitalsForm = ref({
+                    fecha: getTodayDate(),
+                    hora: getCurrentTime(),
+                    paSys: 120,
+                    paDias: 80,
+                    fc: 75,
+                    fr: 18,
+                    temp: 36.5,
+                    spo2: 98,
+                    glucemia: 95,
+                    eva: 0,
+                    observaciones: ''
+                });
+
+                const patientForm = ref({
+                    id: '',
+                    cama: '',
+                    expediente: '',
+                    nombre: '',
+                    edad: null,
+                    diagnostico: '',
+                    historial: []
+                });
+
+                // CARGAR DATOS EN TIEMPO REAL DESDE FIRESTORE
+                onMounted(() => {
+                    db.collection("pacientes").onSnapshot((snapshot) => {
+                        const docs = [];
+                        snapshot.forEach((doc) => {
+                            docs.push({ id: doc.id, ...doc.data() });
+                        });
+                        
+                        if (docs.length === 0) {
+                            const initialData = [
+                                { id: 'p1', cama: '101-A', expediente: 'EXP-1001', nombre: 'María González López', edad: 62, diagnostico: 'Hipertensión Arterial / Control', historial: [{ fecha: getTodayDate(), hora: '07:00', turno: 'Matutino', paSys: 130, paDias: 85, fc: 78, fr: 18, temp: 36.6, spo2: 97, glucemia: 110, eva: 2, estado: 'Normal', observaciones: 'Paciente tranquila, sin dolor.' }] },
+                                { id: 'p2', cama: '102-B', expediente: 'EXP-1002', nombre: 'Carlos Ruiz Martínez', edad: 54, diagnostico: 'Post-quirúrgico Apendicectomía', historial: [{ fecha: getTodayDate(), hora: '07:30', turno: 'Matutino', paSys: 145, paDias: 92, fc: 95, fr: 22, temp: 37.8, spo2: 94, glucemia: 130, eva: 5, estado: 'Alerta', observaciones: 'Presenta dolor moderado en zona quirúrgica.' }] }
+                            ];
+                            initialData.forEach(p => db.collection("pacientes").doc(p.id).set(p));
+                        } else {
+                            patients.value = docs;
+                        }
+                        nextTick(() => {
+                            if (window.lucide) lucide.createIcons();
+                        });
+                    }, (error) => {
+                        console.error("Error al sincronizar con Firestore:", error);
+                    });
+                });
+
+                const evaluateState = (v) => {
+                    if (v.paSys > 140 || v.paSys < 90 || v.paDias > 90 || v.fc > 100 || v.fc < 60 || v.temp > 38 || v.spo2 < 92 || v.eva >= 7) {
+                        return 'Crítico';
+                    } else if (v.paSys > 130 || v.fc > 90 || v.temp > 37.5 || v.spo2 < 95 || v.eva >= 4) {
+                        return 'Alerta';
+                    }
+                    return 'Normal';
+                };
+
+                const getLatestRecord = (patient) => {
+                    if (!patient.historial || patient.historial.length === 0) {
+                        return { paSys: 0, paDias: 0, fc: 0, fr: 0, temp: 0, spo2: 0, glucemia: 0, eva: 0, estado: 'Normal', fecha: '-', hora: '-' };
+                    }
+                    const filteredByTurn = patient.historial.filter(h => h.turno === currentTurno.value);
+                    if (filteredByTurn.length > 0) {
+                        return filteredByTurn[filteredByTurn.length - 1];
+                    }
+                    return patient.historial[patient.historial.length - 1];
+                };
+
+                const filteredPatients = computed(() => {
+                    return patients.value.filter(p => {
+                        const matchSearch = p.nombre.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                                            p.cama.toLowerCase().includes(searchQuery.value.toLowerCase()) || 
+                                            p.diagnostico.toLowerCase().includes(searchQuery.value.toLowerCase());
+                        
+                        const latest = getLatestRecord(p);
+                        const matchEstado = filterEstado.value === 'Todos' || latest.estado === filterEstado.value;
+                        return matchSearch && matchEstado;
+                    });
+                });
+
+                const getBadgeClass = (estado) => {
+                    if (estado === 'Crítico') return 'bg-red-100 text-red-700 font-bold';
+                    if (estado === 'Alerta') return 'bg-amber-100 text-amber-700 font-bold';
+                    return 'bg-emerald-100 text-emerald-700 font-bold';
+                };
+
+                const getDotClass = (estado) => {
+                    if (estado === 'Crítico') return 'bg-red-500';
+                    if (estado === 'Alerta') return 'bg-amber-500';
+                    return 'bg-emerald-500';
+                };
+
+                const verifyAdmin = () => {
+                    if (adminPassword.value === 'admin123') {
+                        isAdmin.value = true;
+                        showAdminModal.value = false; // CIERRA EL MODAL AUTOMÁTICAMENTE
+                        adminPassword.value = '';
+                    } else {
+                        alert('Contraseña incorrecta');
+                        adminPassword.value = '';
+                    }
+                };
+
+                const logoutAdmin = () => {
+                    isAdmin.value = false;
+                    showAdminModal.value = false;
+                };
+
+                const toggleAdminModal = () => {
+                    showAdminModal.value = true;
+                    nextTick(() => {
+                        if (window.lucide) lucide.createIcons();
+                    });
+                };
+
+                const openVitalsModal = (patient) => {
+                    activePatient.value = patient;
+                    vitalsForm.value = {
+                        fecha: getTodayDate(),
+                        hora: getCurrentTime(),
+                        paSys: 120,
+                        paDias: 80,
+                        fc: 75,
+                        fr: 18,
+                        temp: 36.5,
+                        spo2: 98,
+                        glucemia: 95,
+                        eva: 0,
+                        observaciones: ''
+                    };
+                    showVitalsModal.value = true;
+                    nextTick(() => { if (window.lucide) lucide.createIcons(); });
+                };
+
+                const closeVitalsModal = () => {
+                    showVitalsModal.value = false;
+                    activePatient.value = null;
+                };
+
+                const saveVitals = () => {
+                    if (!activePatient.value) return;
+                    const estado = evaluateState(vitalsForm.value);
+                    const newRecord = {
+                        ...vitalsForm.value,
+                        turno: currentTurno.value,
+                        estado: estado
+                    };
+
+                    const updatedHistorial = [...(activePatient.value.historial || []), newRecord];
+                    db.collection("pacientes").doc(activePatient.value.id).update({
+                        historial: updatedHistorial
+                    }).then(() => {
+                        closeVitalsModal();
+                        nextTick(() => { if (window.lucide) lucide.createIcons(); });
+                    });
+                };
+
+                const openPatientModal = (patient) => {
+                    if (patient) {
+                        isEditingPatient.value = true;
+                        patientForm.value = { ...patient };
+                    } else {
+                        isEditingPatient.value = false;
+                        patientForm.value = {
+                            id: 'p_' + Date.now(),
+                            cama: '',
+                            expediente: '',
+                            nombre: '',
+                            edad: null,
+                            diagnostico: '',
+                            historial: []
+                        };
+                    }
+                    showPatientModal.value = true;
+                    nextTick(() => { if (window.lucide) lucide.createIcons(); });
+                };
+
+                const closePatientModal = () => {
+                    showPatientModal.value = false;
+                };
+
+                const savePatient = () => {
+                    if (!patientForm.value.cama || !patientForm.value.nombre) {
+                        alert('Por favor completa el número de cama y el nombre del paciente.');
+                        return;
+                    }
+
+                    const docRef = db.collection("pacientes").doc(patientForm.value.id);
+                    docRef.set(patientForm.value).then(() => {
+                        closePatientModal();
+                        nextTick(() => { if (window.lucide) lucide.createIcons(); });
+                    });
+                };
+
+                const confirmDeletePatient = (id) => {
+                    if (confirm('¿Estás seguro de eliminar este paciente del sistema?')) {
+                        db.collection("pacientes").doc(id).delete();
+                    }
+                };
+
+                const openHistoryModal = (patient) => {
+                    activePatient.value = patient;
+                    showHistoryModal.value = true;
+                    nextTick(() => { if (window.lucide) lucide.createIcons(); });
+                };
+
+                const closeHistoryModal = () => {
+                    showHistoryModal.value = false;
+                    activePatient.value = null;
+                };
+
+                const exportExcel = () => {
+                    let dataToExport = [];
+                    patients.value.forEach(p => {
+                        if (p.historial && p.historial.length > 0) {
+                            p.historial.forEach(h => {
+                                dataToExport.push({
+                                    "Cama": p.cama,
+                                    "Expediente": p.expediente,
+                                    "Paciente": p.nombre,
+                                    "Diagnóstico": p.diagnostico,
+                                    "Turno": h.turno,
+                                    "Fecha": h.fecha,
+                                    "Hora": h.hora,
+                                    "PA Sistólica": h.paSys,
+                                    "PA Diastólica": h.paDias,
+                                    "FC (lpm)": h.fc,
+                                    "FR (rpm)": h.fr,
+                                    "Temp (°C)": h.temp,
+                                    "SpO2 (%)": h.spo2,
+                                    "Glucemia": h.glucemia,
+                                    "EVA": h.eva,
+                                    "Estado Clínico": h.estado,
+                                    "Observaciones": h.observaciones
+                                });
+                            });
+                        } else {
+                            dataToExport.push({
+                                "Cama": p.cama,
+                                "Expediente": p.expediente,
+                                "Paciente": p.nombre,
+                                "Diagnóstico": p.diagnostico,
+                                "Turno": "Sin registros",
+                                "Fecha": "-", "Hora": "-", "PA Sistólica": "-", "PA Diastólica": "-", "FC (lpm)": "-", "FR (rpm)": "-", "Temp (°C)": "-", "SpO2 (%)": "-", "Glucemia": "-", "EVA": "-", "Estado Clínico": "Normal", "Observaciones": "-"
+                            });
+                        }
+                    });
+
+                    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+                    const workbook = XLSX.utils.book_new();
+                    XLSX.utils.book_append_sheet(workbook, worksheet, "SignosVitales");
+                    XLSX.writeFile(workbook, "Reporte_Signos_Vitales_Enfermeria.xlsx");
+                };
+
+                const importExcel = (event) => {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.SheetNames[0];
+                        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet]);
+
+                        let importedPatients = {};
+                        rows.forEach(r => {
+                            let key = r["Cama"] + "_" + r["Paciente"];
+                            if (!importedPatients[key]) {
+                                importedPatients[key] = {
+                                    id: 'imp_' + Math.random().toString(36.substr(2, 9)),
+                                    cama: String(r["Cama"] || ''),
+                                    expediente: String(r["Expediente"] || ''),
+                                    nombre: String(r["Paciente"] || 'Sin Nombre'),
+                                    edad: 50,
+                                    diagnostico: String(r["Diagnóstico"] || ''),
+                                    historial: []
+                                };
+                            }
+                            if (r["Turno"] && r["Turno"] !== "Sin registros") {
+                                importedPatients[key].historial.push({
+                                    fecha: r["Fecha"] || getTodayDate(),
+                                    hora: r["Hora"] || '08:00',
+                                    turno: r["Turno"],
+                                    paSys: Number(r["PA Sistólica"]) || 120,
+                                    paDias: Number(r["PA Diastólica"]) || 80,
+                                    fc: Number(r["FC (lpm)"]) || 75,
+                                    fr: Number(r["FR (rpm)"]) || 18,
+                                    temp: Number(r["Temp (°C)"]) || 36.5,
+                                    spo2: Number(r["SpO2 (%)"]) || 98,
+                                    glucemia: Number(r["Glucemia"]) || 90,
+                                    eva: Number(r["EVA"]) || 0,
+                                    estado: r["Estado Clínico"] || 'Normal',
+                                    observaciones: r["Observaciones"] || ''
+                                });
+                            }
+                        });
+
+                        Object.values(importedPatients).forEach(p => {
+                            db.collection("pacientes").doc(p.id).set(p);
+                        });
+                        alert('¡Base de datos importada y sincronizada con éxito!');
+                    };
+                    reader.readAsArrayBuffer(file);
+                };
+
+                return {
+                    currentTurno, searchQuery, filterEstado, isAdmin, showAdminModal, adminPassword,
+                    patients, filteredPatients, showVitalsModal, showPatientModal, showHistoryModal,
+                    isEditingPatient, activePatient, vitalsForm, patientForm,
+                    getLatestRecord, getBadgeClass, getDotClass, verifyAdmin, logoutAdmin,
+                    toggleAdminModal, openVitalsModal, closeVitalsModal, saveVitals,
+                    openPatientModal, closePatientModal, savePatient, confirmDeletePatient,
+                    openHistoryModal, closeHistoryModal, exportExcel, importExcel
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
